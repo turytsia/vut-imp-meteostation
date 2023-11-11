@@ -190,33 +190,33 @@ typedef enum {
     APDS9960_ALL                = 7,
 } apds9960_mode_t;
 
-#define DEFAULT_ATIME           219     // 103ms
-#define DEFAULT_WTIME           246     // 27ms
-#define DEFAULT_PROX_PPULSE     0x87    // 16us, 8 pulses
-#define DEFAULT_GESTURE_PPULSE  0x89    // 16us, 10 pulses
-#define DEFAULT_POFFSET_UR      0       // 0 offset
-#define DEFAULT_POFFSET_DL      0       // 0 offset      
-#define DEFAULT_CONFIG1         0x60    // No 12x wait (WTIME) factor
-#define DEFAULT_LDRIVE          LED_DRIVE_100MA
-#define DEFAULT_PGAIN           PGAIN_4X
-#define DEFAULT_AGAIN           APDS9960_AGAIN_4X
-#define DEFAULT_PILT            0       // Low proximity threshold
-#define DEFAULT_PIHT            50      // High proximity threshold
-#define DEFAULT_AILT            0xFFFF  // Force interrupt for calibration
-#define DEFAULT_AIHT            0
-#define DEFAULT_PERS            0x11    // 2 consecutive prox or ALS for int.
-#define DEFAULT_CONFIG2         0x01    // No saturation interrupts or LED boost  
-#define DEFAULT_CONFIG3         0       // Enable all photodiodes, no SAI
-#define DEFAULT_GPENTH          40      // Threshold for entering gesture mode
-#define DEFAULT_GEXTH           30      // Threshold for exiting gesture mode    
-#define DEFAULT_GCONF1          0x40    // 4 gesture events for int., 1 for exit
-#define DEFAULT_GGAIN           GGAIN_4X
-#define DEFAULT_GLDRIVE         LED_DRIVE_100MA
-#define DEFAULT_GWTIME          APDS9960_GWTIME_2_8MS
-#define DEFAULT_GOFFSET         0       // No offset scaling for gesture mode
-#define DEFAULT_GPULSE          0xC9    // 32us, 10 pulses
-#define DEFAULT_GCONF3          0       // All photodiodes active during gesture
-#define DEFAULT_GIEN            0       // Disable gesture interrupts
+#define DEFAULT_ATIME           219     // ADC integration time, 103ms
+#define DEFAULT_WTIME           1000     // Wait time, 27ms
+#define DEFAULT_PROX_PPULSE     0x87    // Proximity pulse count and length
+#define DEFAULT_GESTURE_PPULSE  260    // Gesture pulse count and length
+#define DEFAULT_POFFSET_UR      0       // Up-right proximity offset
+#define DEFAULT_POFFSET_DL      0       // Down-left proximity offset
+#define DEFAULT_CONFIG1         0x60    // Configuration 1, no 12x wait factor
+#define DEFAULT_LDRIVE          LED_DRIVE_100MA // LED Drive strength
+#define DEFAULT_PGAIN           PGAIN_4X // Proximity gain
+#define DEFAULT_AGAIN           APDS9960_AGAIN_4X // ALS gain
+#define DEFAULT_PILT            0       // Proximity interrupt low threshold
+#define DEFAULT_PIHT            50      // Proximity interrupt high threshold
+#define DEFAULT_AILT            0xFFFF  // ALS low threshold for interrupt
+#define DEFAULT_AIHT            0       // ALS high threshold for interrupt
+#define DEFAULT_PERS            0x11    // Interrupt persistence filters
+#define DEFAULT_CONFIG2         0x01    // Configuration 2, no saturation interrupts or LED boost
+#define DEFAULT_CONFIG3         0       // Configuration 3, enable all photodiodes, no SAI
+#define DEFAULT_GPENTH          40      // Gesture enter threshold
+#define DEFAULT_GEXTH           30      // Gesture exit threshold
+#define DEFAULT_GCONF1          0x40    // Gesture configuration 1, 4 gesture events for interrupt, 1 for exit
+#define DEFAULT_GGAIN           GGAIN_4X // Gesture gain
+#define DEFAULT_GLDRIVE         LED_DRIVE_100MA // Gesture LED Drive strength
+#define DEFAULT_GWTIME          APDS9960_GWTIME_2_8MS // Gesture wait time
+#define DEFAULT_GOFFSET         0       // Gesture offset scaling
+#define DEFAULT_GPULSE          0xC9    // Gesture pulse count and length
+#define DEFAULT_GCONF3          0       // Gesture configuration 3, all photodiodes active during gesture
+#define DEFAULT_GIEN            0       // Gesture interrupt enable
 
 typedef struct control {
     uint8_t again : 2; //ALS and Color gain control

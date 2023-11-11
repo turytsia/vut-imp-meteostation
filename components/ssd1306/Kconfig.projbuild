@@ -9,20 +9,9 @@ menu "SSD1306 Configuration"
 		default 19 if IDF_TARGET_ESP32C3
 		default 30 if IDF_TARGET_ESP32C6
 
-	choice INTERFACE
-		prompt "Interface"
-		default I2C_INTERFACE
-		help
-			Select Interface.
-		config I2C_INTERFACE
-			bool "I2C Interface"
-			help
-				I2C Interface.
-		config SPI_INTERFACE
-			bool "SPI Interface"
-			help
-				SPI Interface.
-	endchoice
+	config INTERFACE
+		string
+		default "I2C_INTERFACE SPI_INTERFACE"
 
 	choice PANEL
 		prompt "Panel Type"
