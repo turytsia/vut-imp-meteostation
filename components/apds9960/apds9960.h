@@ -29,9 +29,9 @@
 #define APDS9960_RIGHT          0x04
 
 /* Gesture parameters */
-#define GESTURE_THRESHOLD_OUT   10   //Output threshold
-#define GESTURE_SENSITIVITY_1   50   //sensitivity 1
-#define GESTURE_SENSITIVITY_2   20   //distance sensitivity, increase the value to get more sensitive
+#define GESTURE_THRESHOLD_OUT   2500   //Output threshold
+#define GESTURE_SENSITIVITY_1   10   //sensitivity 1
+#define GESTURE_SENSITIVITY_2   10   //distance sensitivity, increase the value to get more sensitive
 
 #define APDS9960_WHO_AM_I_REG   ((uint8_t)0x92)
 #define APDS9960_WHO_AM_I_VAL   ((uint8_t)0xAB)
