@@ -1,57 +1,115 @@
+/**
+ * @file main.c
+ * @brief Main application file for handling MQTT communication, displaying weather information on an OLED screen,
+ *        and interacting with an APDS9960 gesture sensor.
+ *
+ * This file contains the main program logic, including initialization of the NVS (Non-Volatile Storage),
+ * WIFI configuration, MQTT event handling, and the creation of views for displaying information on an OLED screen.
+ * Additionally, the program interacts with an APDS9960 gesture sensor to capture user inputs for navigation and confirmation.
+ *
+ * @author Oleksandr Turytsia (xturyt00)
+ * @date 14/11/2023
+ */
 #include "main.h"
-/*
- You have to set this config value with menuconfig
- CONFIG_INTERFACE
 
- for i2c
- CONFIG_MODEL
- CONFIG_SDA_GPIO
- CONFIG_SCL_GPIO
- CONFIG_RESET_GPIO
-
- for SPI
- CONFIG_CS_GPIO
- CONFIG_DC_GPIO
- CONFIG_RESET_GPIO
-*/
-
+ // Pin configurations for SSD1306 OLED display
 #define CONFIG_CS_GPIO 5
 #define CONFIG_DC_GPIO 27
 #define CONFIG_RESET_GPIO 17
 #define CONFIG_MOSI_GPIO 23
 #define CONFIG_SCLK_GPIO 18
 
+// Pin configurations for I2C communication
 #define CONFIG_SDA_GPIO 25
 #define CONFIG_SCL_GPIO 26
 
+// I2C bus and APDS9960 sensor configurations
 #define I2C_BUS       I2C_NUM_0
 #define APDS9960_ADDR 0x39 
 
-#define tag "SSD1306"
+// Tags for logging purposes
+#define TAG_SSD1306 "SSD1306"
+#define TAG_APDS9960 "APDS9960"
+#define TAG_WIFI "WIFI"
+#define TAG_MQTT "MQTT"
 
-#if CONFIG_I2C_PORT_0
-#define I2C_NUM I2C_NUM_0
-#elif CONFIG_I2C_PORT_1
-#define I2C_NUM I2C_NUM_1
-#else
-#define I2C_NUM I2C_NUM_0 // if spi is selected
-#endif
+// MQTT message prefixes
+#define PREFIX_CITY "[CITY]"
+#define PREFIX_DATA "[DATA]"
 
+// MQTT broker configuration
 #define CONFIG_BROKER_URL "mqtt://broker.hivemq.com"
 #define CONFIG_BROKER_PORT 1883
 #define CONFIG_MQTT_TOPIC "test"
 
-#define PREFIX_CITY "[CITY]"
-#define PREFIX_DATA "[DATA]"
+// Wi-Fi credentials
+#define SSID "FLAT_420"
+#define PASSWORD "jakub420"
 
-static const char* TAG = "MQTT";
+// Maximum buffer size for data
+#define MAX_BUFF 256
 
-
-// TODO fix these arguments
-char TEMPERATURE[255] = { 0 };
-char HUMIDITY[255] = { 0 };
-char VISIBILITY[255] = { 0 };
+// Buffers for storing sensor data
+char TEMPERATURE[MAX_BUFF] = { 0 };
+char HUMIDITY[MAX_BUFF] = { 0 };
+char VISIBILITY[MAX_BUFF] = { 0 };
 int CITY = 0;
+
+// Handles for I2C bus, APDS9960 sensor and SSD1306 monitor
+i2c_bus_handle_t i2c_bus;
+apds9960_handle_t apds9960;
+SSD1306_t dev;
+
+/**
+ * @brief Cleans up resources before program termination.
+ *
+ * This function is responsible for cleaning up allocated resources, such as deleting the APDS9960
+ * instance and the I2C bus
+ */
+void cleanup() {
+    apds9960_delete(&apds9960);
+    i2c_bus_delete(&i2c_bus);
+}
+
+/**
+ * @brief Exits the program with an error message and performs cleanup.
+ *
+ * This function is used to handle errors by printing an error message to the console, performing
+ * cleanup using the cleanup() function, and then exiting the program with an error status.
+ *
+ * @param message The error message to be printed before exiting.
+ */
+void exit_error(const char* message) {
+    printf(message);
+    cleanup();
+    exit(1);
+}
+
+/**
+ * @brief Waits for a valid gesture and returns the detected gesture.
+ *
+ * This function waits for a valid gesture input from the APDS9960 sensor. It continuously reads
+ * gesture data until a non-zero value is obtained, indicating a valid gesture. If an error occurs
+ * during the gesture reading process, the function exits the program with an error message.
+ *
+ * @return int8_t The detected gesture. A non-zero value indicates a valid gesture, and the specific
+ * gesture code is returned. A value of -1 indicates an error during gesture reading.
+ */
+int8_t wait_for_gesture() {
+    int8_t gesture;     // Variable to store gesture input
+
+    ESP_LOGI(TAG_APDS9960, "Waiting for the gesture...");
+
+    // Wait for a valid gesture input
+    while ((gesture = apds9960_read_gesture(apds9960)) == 0);
+
+    // Check error gesture read
+    if (gesture == -1) {
+        exit_error("Error when reading gesture occured\n");
+    }
+
+    return gesture;
+}
 
 /**
  * @brief Handles Wi-Fi events, such as start, connection, disconnection, and obtaining an IP address.
@@ -71,18 +129,18 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "Wi-Fi started");
+        ESP_LOGI(TAG_WIFI, "Wi-Fi started");
         esp_wifi_connect();
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-        ESP_LOGI(TAG, "Wi-Fi connected");
+        ESP_LOGI(TAG_WIFI, "Wi-Fi connected");
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGE(TAG, "Wi-Fi disconnected, trying to reconnect...");
+        ESP_LOGE(TAG_WIFI, "Wi-Fi disconnected, trying to reconnect...");
         esp_wifi_connect();
     }
     else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ESP_LOGI(TAG, "Got an IP address");
+        ESP_LOGI(TAG_WIFI, "Got an IP address");
     }
 }
 
@@ -135,18 +193,18 @@ void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_t event
     case MQTT_EVENT_CONNECTED:
         // Subscribe to the specified MQTT topic upon successful connection
         if (esp_mqtt_client_subscribe(client, CONFIG_MQTT_TOPIC, 0) == -1) {
-            ESP_LOGI(TAG, "MQTT_EVENT connection failed");
+            ESP_LOGI(TAG_MQTT, "MQTT_EVENT connection failed");
         }
         else {
-            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED success");
+            ESP_LOGI(TAG_MQTT, "MQTT_EVENT_CONNECTED success");
         }
         
         break;
     case MQTT_EVENT_DATA:
-        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+        ESP_LOGI(TAG_MQTT, "MQTT_EVENT_DATA");
 
         // Process received MQTT data
-        char buff[256] = { 0 };
+        char buff[MAX_BUFF] = { 0 };
         strncpy(buff, event->data, event->data_len);
 
         // Extract the prefix from the received message
@@ -162,13 +220,13 @@ void mqtt_event_handler(void* handler_args, esp_event_base_t base, int32_t event
 
         break;
     case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        ESP_LOGI(TAG_MQTT, "MQTT_EVENT_DISCONNECTED");
         break;
     case MQTT_EVENT_SUBSCRIBED:
-        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        ESP_LOGI(TAG_MQTT, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_PUBLISHED:
-        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        ESP_LOGI(TAG_MQTT, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
     default:
         break;
@@ -193,8 +251,7 @@ static void mqtt_task(void* param)
     // Initialize the MQTT client
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     if (client == NULL) {
-        printf("Error esp_mqtt_client_init parse error\n");
-        exit(1);
+        exit_error("Error esp_mqtt_client_init parse error\n");
     }
 
     // Register the MQTT event handler for handling MQTT events
@@ -204,16 +261,16 @@ static void mqtt_task(void* param)
     ESP_ERROR_CHECK(esp_mqtt_client_start(client));
 
     while (1) {
-        char buff[256];
+        char buff[MAX_BUFF];
         sprintf(buff, "%s %s", PREFIX_CITY, CITY_CONFIG[CITY]);
 
         // Publish the message to the MQTT broker
         int msg_id = esp_mqtt_client_publish(client, CONFIG_MQTT_TOPIC, buff, strlen(buff), 1, 0);
         if (msg_id == -1) {
-            ESP_LOGI(TAG, "Error occured when sending message to MQTT broker");
+            ESP_LOGI(TAG_MQTT, "Error occured when sending message to MQTT broker");
         }
         else {
-            ESP_LOGI(TAG, "Published message ID: %d", msg_id);
+            ESP_LOGI(TAG_MQTT, "Published message ID: %d", msg_id);
         }
 
         // Delay before publishing the next message
@@ -273,8 +330,8 @@ void init_wifi() {
     // Configure WiFi connection parameters
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = "FLAT_420",
-            .password = "jakub420",
+            .ssid = SSID,
+            .password = PASSWORD,
         },
     };
 
@@ -289,6 +346,9 @@ void init_wifi() {
 
     // Start the WiFi driver
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Wait to connect to wifi
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
 /**
@@ -300,34 +360,27 @@ void init_wifi() {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_temperature(SSD1306_t* dev, apds9960_handle_t* apds9960) {
-    uint8_t gesture;    // Variable to store gesture input
-
+void view_temperature() {
     while (1) {
         // Update OLED screen with temperature information
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "- <Temperature -", 16, true);
-        ssd1306_display_text(dev, 4, TEMPERATURE, strlen(TEMPERATURE), false);
-
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_humidity'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "- <Temperature -", 16, true);
+        ssd1306_display_text(&dev, 4, TEMPERATURE, strlen(TEMPERATURE), false);
 
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
             break;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
             return;
         }
     }
@@ -342,34 +395,27 @@ void view_temperature(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_humidity(SSD1306_t* dev, apds9960_handle_t* apds9960) {
-    uint8_t gesture;    // Variable to store gesture input
-
+void view_humidity() {
     while (1) {
         // Update OLED screen with humidity information
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "-- < Humidity --", 16, true);
-        ssd1306_display_text(dev, 4, HUMIDITY, strlen(HUMIDITY), false);
-
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_humidity'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "-- < Humidity --", 16, true);
+        ssd1306_display_text(&dev, 4, HUMIDITY, strlen(HUMIDITY), false);
 
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
             break;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
             return;
         }
     }
@@ -384,34 +430,27 @@ void view_humidity(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_visibility(SSD1306_t* dev, apds9960_handle_t* apds9960) {
-    uint8_t gesture;    // Variable to store gesture input
-
+void view_visibility() {
     while (1) {
         // Update OLED screen with visibility information
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "- < Visibility -", 16, true);
-        ssd1306_display_text(dev, 4, VISIBILITY, strlen(VISIBILITY), false);
-
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_visibility'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "- < Visibility -", 16, true);
+        ssd1306_display_text(&dev, 4, VISIBILITY, strlen(VISIBILITY), false);
 
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
             break;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
             return;
         }
     }
@@ -429,9 +468,8 @@ void view_visibility(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  * @return True if the user confirms with "Yes", false if they choose "No".
  */
-bool view_confirm(SSD1306_t* dev, apds9960_handle_t* apds9960) {
+bool view_confirm() {
     int opt_idx = 0; // Index of the currently selected option
-    uint8_t gesture; // Variable to store gesture input
 
     // Options for confirmation
     const char* options[] = {
@@ -442,50 +480,45 @@ bool view_confirm(SSD1306_t* dev, apds9960_handle_t* apds9960) {
     const int SIZE = sizeof(options) / sizeof(options[0]);  // Number of options in the confirmation prompt
 
     while (1) {
-        char buff[256];
+        char buff[MAX_BUFF];
 
         // Display area information on the OLED screen
         sprintf(buff, "Area: %s", CITY_CONFIG[CITY]);
 
         // Update OLED screen with confirmation prompt
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "---- <Areas ----", 16, false);
-        ssd1306_display_text(dev, 1, "Are you sure?", 13, false);
-        ssd1306_display_text(dev, 7, buff, strlen(buff), false);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "---- <Areas ----", 16, false);
+        ssd1306_display_text(&dev, 1, "Are you sure?", 13, false);
+        ssd1306_display_text(&dev, 7, buff, strlen(buff), false);
 
         // Display confirmation options on the OLED screen
         for (int i = 0; i < SIZE; i++) {
-            ssd1306_display_text(dev, i + 3, (char*)options[i], strlen(options[i]), opt_idx == i);
+            ssd1306_display_text(&dev, i + 3, (char*)options[i], strlen(options[i]), opt_idx == i);
         }
 
         // Delay to prevent rapid menu changes
         vTaskDelay(500 / portTICK_PERIOD_MS);
 
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_confirm'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
-
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
 
             opt_idx = (opt_idx + 1) % SIZE;
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
 
             opt_idx = (opt_idx - 1 + SIZE) % SIZE;
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
 
             // Return true if the user confirms with "Yes" and false for "No"
             return opt_idx == 0;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
 
             // Return false if the user chooses to leave this prompt
             return false;
@@ -506,49 +539,43 @@ bool view_confirm(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_cities(SSD1306_t* dev, apds9960_handle_t* apds9960) {
+void view_cities() {
     int city_idx = 0;   // Index of the currently selected city
-    uint8_t gesture;    // Variable to store gesture input
     
     const int SIZE = sizeof(CITY_CONFIG) / sizeof(CITY_CONFIG[0]);  // Number of cities in the list
 
     while (1) {
-        char buff[256];
+        char buff[MAX_BUFF];
 
         // Display area information on the OLED screen
         sprintf(buff, "Area: %s", CITY_CONFIG[CITY]);
 
         // Update OLED screen with city information
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "---- <Areas ----", 16, false);
-        ssd1306_display_text(dev, 7, buff, strlen(buff), false);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "---- <Areas ----", 16, false);
+        ssd1306_display_text(&dev, 7, buff, strlen(buff), false);
 
         // Display city options on the OLED screen
         for (int i = 0; i < SIZE; i++) {
-            ssd1306_display_text(dev, i + 1, (char*)CITY_CONFIG[i], strlen(CITY_CONFIG[i]), city_idx == i);
+            ssd1306_display_text(&dev, i + 1, (char*)CITY_CONFIG[i], strlen(CITY_CONFIG[i]), city_idx == i);
         }
 
         // Delay to prevent rapid option changes
         vTaskDelay(500 / portTICK_PERIOD_MS);
 
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_cities'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
-
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
             city_idx = (city_idx + 1) % SIZE;
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
             city_idx = (city_idx - 1 + SIZE) % SIZE;
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
 
             // Prompt for confirmation and update the selected city if confirmed
             if (!view_confirm(dev, apds9960)) break;
@@ -556,18 +583,11 @@ void view_cities(SSD1306_t* dev, apds9960_handle_t* apds9960) {
             CITY = city_idx;
             return;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
             return;
         }
     }
 }
-
-const view_t MENU_VIEWS[] = {
-    [MENU_TEMPERATURE] = view_temperature,
-    [MENU_HUMIDITY] = view_humidity,
-    [MENU_VISIBILITY] = view_visibility,
-    [MENU_SELECT_AREA] = view_cities
-};
 
 /**
  * @brief Displays a menu on the OLED screen and handles gesture-based navigation.
@@ -580,59 +600,60 @@ const view_t MENU_VIEWS[] = {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_menu(SSD1306_t* dev, apds9960_handle_t* apds9960) {
+void view_menu() {
+    const view_t MENU_VIEWS[] = {
+        [MENU_TEMPERATURE] = view_temperature,
+        [MENU_HUMIDITY] = view_humidity,
+        [MENU_VISIBILITY] = view_visibility,
+        [MENU_SELECT_AREA] = view_cities
+    };
+
     int view_idx = 0;   // Index of the currently selected menu option
     view_t view = MENU_VIEWS[view_idx];    // Function pointer to the selected view
-    uint8_t gesture;    // Variable to store gesture input
 
     while (1) {
-        char buff[256];
+        char buff[MAX_BUFF];
 
         // Display area information on the OLED screen
         sprintf(buff, "Area: %s", CITY_CONFIG[CITY]);
 
         // Update OLED screen with menu information
-        ssd1306_clear_screen(dev, false);
-        ssd1306_contrast(dev, 0xff);
-        ssd1306_display_text(dev, 0, "----- Menu -----", 16, false);
-        ssd1306_display_text(dev, 7, buff, strlen(buff), false);
+        ssd1306_clear_screen(&dev, false);
+        ssd1306_contrast(&dev, 0xff);
+        ssd1306_display_text(&dev, 0, "----- Menu -----", 16, false);
+        ssd1306_display_text(&dev, 7, buff, strlen(buff), false);
         
         // Display menu options on the OLED screen
         for (int i = 0; i < MENU_SIZE; i++) {
-            ssd1306_display_text(dev, i + 1, (char*)MENU_CONFIG[i], strlen(MENU_CONFIG[i]), view_idx == i);
+            ssd1306_display_text(&dev, i + 1, (char*)MENU_CONFIG[i], strlen(MENU_CONFIG[i]), view_idx == i);
         }
 
         // Delay to prevent rapid menu changes
         vTaskDelay(500 / portTICK_PERIOD_MS);
 
-        ESP_LOGI(tag, "Waiting for the gesture at 'view_menu'...");
-
-        // Wait for a valid gesture input
-        while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
-
         // Process gesture data
-        switch (gesture) {
+        switch (wait_for_gesture()) {
         case APDS9960_UP:
-            ESP_LOGI(tag, "Gesture: DOWN");
+            ESP_LOGI(TAG_APDS9960, "Gesture: DOWN");
             // Move selection up in the menu
             view_idx = (view_idx + 1) % MENU_SIZE;
             break;
         case APDS9960_DOWN:
-            ESP_LOGI(tag, "Gesture: UP");
+            ESP_LOGI(TAG_APDS9960, "Gesture: UP");
             // Move selection down in the menu
             view_idx = (view_idx - 1 + MENU_SIZE) % MENU_SIZE;
             break;
         case APDS9960_LEFT:
-            ESP_LOGI(tag, "Gesture: RIGHT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: RIGHT");
 
             // Get the selected view associated with the menu option
             view = MENU_VIEWS[view_idx];
 
             // Execute the selected view's function
-            view(dev, apds9960);
+            view();
             break;
         case APDS9960_RIGHT:
-            ESP_LOGI(tag, "Gesture: LEFT");
+            ESP_LOGI(TAG_APDS9960, "Gesture: LEFT");
             break;
         }
     }
@@ -648,24 +669,19 @@ void view_menu(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * @param dev Pointer to the SSD1306 display structure.
  * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
-void view_welcome(SSD1306_t* dev, apds9960_handle_t* apds9960) {
-    uint8_t gesture;    // Variable to store gesture input
-
+void view_welcome() {
     // Clear OLED screen and set contrast
-    ssd1306_clear_screen(dev, true);
-    ssd1306_contrast(dev, 0xff);
+    ssd1306_clear_screen(&dev, true);
+    ssd1306_contrast(&dev, 0xff);
 
     // Display welcome message
-    ssd1306_display_text(dev, 2, "    Welcome", 11, true);
-    ssd1306_display_text(dev, 4, "Swipe to launch!", 16, true);
+    ssd1306_display_text(&dev, 2, "    Welcome", 11, true);
+    ssd1306_display_text(&dev, 4, "Swipe to launch!", 16, true);
 
-    ESP_LOGI(tag, "Waiting for the gesture at 'view_welcome'...");
-
-    // Wait for a valid gesture input 
-    while ((gesture = apds9960_read_gesture(*apds9960)) == 0);
+    wait_for_gesture();
 
     // Proceed to the menu view
-    view_menu(dev, apds9960);
+    view_menu();
 }
 
 /**
@@ -676,19 +692,15 @@ void view_welcome(SSD1306_t* dev, apds9960_handle_t* apds9960) {
  * engine of the APDS9960 sensor and creates a view with welcome text.
  */
 void app_run() {
-
-    // SPI Monitor configuration
-    SSD1306_t dev;
-  
-    ESP_LOGI(tag, "INTERFACE is SPI");
-    ESP_LOGI(tag, "CONFIG_MOSI_GPIO=%d", CONFIG_MOSI_GPIO);
-    ESP_LOGI(tag, "CONFIG_SCLK_GPIO=%d", CONFIG_SCLK_GPIO);
-    ESP_LOGI(tag, "CONFIG_CS_GPIO=%d", CONFIG_CS_GPIO);
-    ESP_LOGI(tag, "CONFIG_DC_GPIO=%d", CONFIG_DC_GPIO);
-    ESP_LOGI(tag, "CONFIG_RESET_GPIO=%d", CONFIG_RESET_GPIO);
+    ESP_LOGI(TAG_SSD1306, "INTERFACE is SPI");
+    ESP_LOGI(TAG_SSD1306, "CONFIG_MOSI_GPIO=%d", CONFIG_MOSI_GPIO);
+    ESP_LOGI(TAG_SSD1306, "CONFIG_SCLK_GPIO=%d", CONFIG_SCLK_GPIO);
+    ESP_LOGI(TAG_SSD1306, "CONFIG_CS_GPIO=%d", CONFIG_CS_GPIO);
+    ESP_LOGI(TAG_SSD1306, "CONFIG_DC_GPIO=%d", CONFIG_DC_GPIO);
+    ESP_LOGI(TAG_SSD1306, "CONFIG_RESET_GPIO=%d", CONFIG_RESET_GPIO);
     spi_master_init(&dev, CONFIG_MOSI_GPIO, CONFIG_SCLK_GPIO, CONFIG_CS_GPIO, CONFIG_DC_GPIO, CONFIG_RESET_GPIO);
 
-    ESP_LOGI(tag, "Panel is 128x64");
+    ESP_LOGI(TAG_SSD1306, "Panel is 128x64");
     ssd1306_init(&dev, 128, 64);
 
     // Initialize I2C bus for APDS9960
@@ -702,17 +714,15 @@ void app_run() {
     };
 
     // Create I2C bus handle based on config
-    i2c_bus_handle_t i2c0_bus_1 = i2c_bus_create(I2C_NUM, &conf);
-    if (i2c0_bus_1 == NULL) {
-        printf("Error i2c_bus_create\n");
-        exit(1);
+    i2c_bus = i2c_bus_create(I2C_NUM_1, &conf);
+    if (i2c_bus == NULL) {
+        exit_error("Error i2c_bus_create\n");
     }
- 
+    
     // Create APDS9960 handle
-    apds9960_handle_t apds9960 = apds9960_create(i2c0_bus_1, APDS9960_ADDR);
+    apds9960 = apds9960_create(i2c_bus, APDS9960_I2C_ADDRESS);
     if (apds9960 == NULL) {
-        printf("Error apds9960_create\n");
-        exit(1);
+        exit_error("Error apds9960_create\n");
     }
 
     // Initialize gesture engine
@@ -721,7 +731,7 @@ void app_run() {
     ESP_ERROR_CHECK(apds9960_enable_gesture_engine(apds9960, true));
 
     // Create view with welcome text
-    view_welcome(&dev, &apds9960);
+    view_welcome();
 }
 
 
@@ -747,6 +757,9 @@ void app_main(void)
 
     // Start app
     app_run();
+
+    // Cleanup
+    cleanup();
 
     // Restart app if error occured
     esp_restart();

@@ -20,7 +20,7 @@
 #define ACK_CHECK_DIS           0x0               /*!< I2C master will not check ack from slave */
 #define ACK_VAL                 0x0               /*!< I2C ack value */
 #define NACK_VAL                0x1               /*!< I2C nack value */
-#define APDS9960_TIME_MULT      2.78              //millisec
+#define APDS9960_TIME_MULT      2              //millisec
 #define ERROR                   0xFF
 
 #define APDS9960_UP             0x01
@@ -29,9 +29,9 @@
 #define APDS9960_RIGHT          0x04
 
 /* Gesture parameters */
-#define GESTURE_THRESHOLD_OUT   2500   //Output threshold
-#define GESTURE_SENSITIVITY_1   10   //sensitivity 1
-#define GESTURE_SENSITIVITY_2   10   //distance sensitivity, increase the value to get more sensitive
+#define GESTURE_THRESHOLD_OUT   10   //Output threshold
+#define GESTURE_SENSITIVITY_1   50   //sensitivity 1
+#define GESTURE_SENSITIVITY_2   50   //distance sensitivity, increase the value to get more sensitive
 
 #define APDS9960_WHO_AM_I_REG   ((uint8_t)0x92)
 #define APDS9960_WHO_AM_I_VAL   ((uint8_t)0xAB)

@@ -20,7 +20,7 @@
 #include "nvs_flash.h"
 #include "esp_now.h"
 
-typedef void (*view_t)(SSD1306_t*, apds9960_handle_t*);
+typedef void (*view_t)();
 
 typedef enum {
     MENU_TEMPERATURE = 0,
