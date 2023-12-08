@@ -45,8 +45,7 @@ client.on_message = on_message
 
 client.connect("broker.hivemq.com", 1883, 60)
 
-# Keep the client running
-client.loop_start()  # Start the loop in the background
+client.loop_start() 
 
 while not client.is_connected():
     time.sleep(1)
@@ -54,13 +53,10 @@ while not client.is_connected():
 try:
     while True:
         time.sleep(5)
-        # # Publish a message
         client.publish("test", f"{PREFIX_DATA} {','.join(list(DATA[CITY].values()))}\n")
         client.publish("test", f"{PREFIX_CITIES} {','.join(list(DATA.keys()))}\n")
 except KeyboardInterrupt:
     print("Exiting loop.")
-    # Stop the loop when done
     client.loop_stop()
 
-# Keep the script running for a while
-client.loop_stop()  # Stop the loop
+client.loop_stop() 

@@ -23,8 +23,7 @@
 #define CONFIG_SDA_GPIO 25
 #define CONFIG_SCL_GPIO 26
 
-// I2C bus and APDS9960 sensor configurations
-#define I2C_BUS       I2C_NUM_0
+// APDS9960 sensor configurations
 #define APDS9960_ADDR 0x39 
 
 // Tags for logging purposes
@@ -43,8 +42,8 @@
 #define CONFIG_MQTT_TOPIC "test"
 
 // Wi-Fi credentials
-#define SSID "FLAT_420"
-#define PASSWORD "jakub420"
+#define SSID "Oleksandr’s iPhone"
+#define PASSWORD "12345679"
 
 // Maximum buffer size for data
 #define MAX_BUFF 256
@@ -356,9 +355,6 @@ void init_wifi() {
  *
  * This function continuously displays temperature information on the OLED screen and waits for gesture
  * inputs from the APDS9960 sensor. It only includes a "LEFT" gesture to return to the previous view.
- *
- * @param dev Pointer to the SSD1306 display structure.
- * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
 void view_temperature() {
     while (1) {
@@ -391,9 +387,6 @@ void view_temperature() {
  *
  * This function continuously displays humidity information on the OLED screen and waits for gesture
  * inputs from the APDS9960 sensor. It only includes a "LEFT" gesture to return to the previous view.
- *
- * @param dev Pointer to the SSD1306 display structure.
- * @param apds9960 Pointer to the APDS9960 sensor handle.
  */
 void view_humidity() {
     while (1) {
